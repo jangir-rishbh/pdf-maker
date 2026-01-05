@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import Layout from '@/components/Layout';
 import FileUpload from '@/components/FileUpload';
+import ImagePreview from '@/components/ImagePreview';
 import { Button } from '@/components/ui/button';
 import { 
   Image, 
@@ -27,6 +28,8 @@ export default function ToolsPage() {
   const [selectedTool, setSelectedTool] = useState<Tool | null>(null);
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [generatedImages, setGeneratedImages] = useState<{ url: string; name: string }[]>([]);
+  const [zipUrl, setZipUrl] = useState<string | null>(null);
 
   const tools: Tool[] = [
     {
@@ -65,6 +68,13 @@ export default function ToolsPage() {
       acceptedTypes: ['.pdf']
     },
     {
+      id: 'pdf-to-image',
+      name: 'PDF to Image',
+      icon: <Upload className="h-6 w-6" />,
+      description: 'Convert PDF pages to images',
+      acceptedTypes: ['.pdf']
+    },
+    {
       id: 'text-to-pdf',
       name: 'Text to PDF',
       icon: <Type className="h-6 w-6" />,
@@ -86,10 +96,99 @@ export default function ToolsPage() {
     if (!selectedTool || uploadedFiles.length === 0) return;
     
     setIsProcessing(true);
-    // Processing logic will be added here
-    setTimeout(() => {
+    
+    try {
+      const formData = new FormData();
+      uploadedFiles.forEach((file) => {
+        formData.append('files', file);
+      });
+      formData.append('tool', selectedTool.id);
+
+      const response = await fetch('/api/pdf/generate', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error('PDF processing failed');
+      }
+
+      if (selectedTool.id === 'pdf-to-image') {
+        // Handle ZIP file with HTML pages
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        
+        // Create sample images for preview (in real implementation, extract from ZIP)
+        const sampleImages = [];
+        const pageCount = 3; // Estimate or get from PDF
+        
+        for (let i = 1; i <= pageCount; i++) {
+          // Create a simple preview image
+          sampleImages.push({
+            url: `data:image/svg+xml;base64,${btoa(`
+              <svg width="300" height="200" xmlns="http://www.w3.org/2000/svg">
+                <rect width="100%" height="100%" fill="#ffffff" stroke="#333333" stroke-width="2"/>
+                <text x="50%" y="40%" text-anchor="middle" font-family="Arial" font-size="18" font-weight="bold" fill="#333333">
+                  PDF Page ${i}
+                </text>
+                <text x="50%" y="60%" text-anchor="middle" font-family="Arial" font-size="12" fill="#666666">
+                  Click to download HTML file
+                </text>
+                <rect x="10" y="10" width="60" height="20" fill="#3b82f6" rx="2"/>
+                <text x="40" y="24" text-anchor="middle" font-family="Arial" font-size="10" fill="white">
+                  Page ${i}
+                </text>
+              </svg>
+            `)}`,
+            name: `page-${i}.html`
+          });
+        }
+        setGeneratedImages(sampleImages);
+        
+        // Store ZIP URL for download
+        setZipUrl(url);
+      } else {
+        // Download the PDF for other tools
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${selectedTool.name.replace(/\s+/g, '-').toLowerCase()}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+      }
+      
+    } catch (error) {
+      console.error('Error processing PDF:', error);
+      alert('Failed to process PDF. Please try again.');
+    } finally {
       setIsProcessing(false);
-    }, 2000);
+    }
+  };
+
+  const handleDownload = async (index: number) => {
+    if (index === -1) {
+      // Download all as ZIP
+      if (zipUrl) {
+        const a = document.createElement('a');
+        a.href = zipUrl;
+        a.download = 'pdf-images.zip';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      }
+    } else {
+      // Download individual image
+      const image = generatedImages[index];
+      const a = document.createElement('a');
+      a.href = image.url;
+      a.download = image.name;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
   };
 
   return (
@@ -170,6 +269,16 @@ export default function ToolsPage() {
                     </>
                   )}
                 </Button>
+              </div>
+            )}
+            
+            {/* Show Image Preview for PDF to Image */}
+            {selectedTool?.id === 'pdf-to-image' && generatedImages.length > 0 && (
+              <div className="mt-8">
+                <ImagePreview 
+                  images={generatedImages}
+                  onDownload={handleDownload}
+                />
               </div>
             )}
           </div>

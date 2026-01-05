@@ -18,10 +18,40 @@ export default function Home() {
     if (uploadedFiles.length === 0) return;
     
     setIsProcessing(true);
-    // PDF generation logic will be added here
-    setTimeout(() => {
+    
+    try {
+      const formData = new FormData();
+      uploadedFiles.forEach((file) => {
+        formData.append('files', file);
+      });
+      formData.append('tool', 'image-to-pdf');
+
+      const response = await fetch('/api/pdf/generate', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error('PDF generation failed');
+      }
+
+      // Download the PDF
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'generated.pdf';
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      
+    } catch (error) {
+      console.error('Error generating PDF:', error);
+      alert('Failed to generate PDF. Please try again.');
+    } finally {
       setIsProcessing(false);
-    }, 2000);
+    }
   };
 
   const features = [
@@ -111,6 +141,7 @@ export default function Home() {
               'PDF Merge',
               'PDF Split',
               'Add Password',
+              'PDF to Image',
               'Text to PDF'
             ].map((tool, index) => (
               <Button
