@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { PDFDocument, rgb } from 'pdf-lib';
 import JSZip from 'jszip';
-import puppeteer from 'puppeteer';
 
 export async function POST(request: NextRequest) {
   try {
@@ -14,7 +13,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (tool === 'pdf-to-image') {
-      return await convertPDFToImagesPuppeteer(files[0]);
+      return NextResponse.json({ error: 'Client-side processing required' }, { status: 400 });
     }
 
     let result: Uint8Array;
@@ -70,78 +69,4 @@ async function convertTextToPDF(file: File): Promise<Uint8Array> {
   const page = pdfDoc.addPage([595, 842]);
   page.drawText(text, { x: 50, y: 842 - 50, size: 12, color: rgb(0, 0, 0), maxWidth: 595 - 100 });
   return pdfDoc.save();
-}
-
-async function convertPDFToImagesPuppeteer(file: File): Promise<Response> {
-  const pdfBytes = await file.arrayBuffer();
-  const pdfBase64 = Buffer.from(pdfBytes).toString('base64');
-
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox']
-  });
-
-  try {
-    const page = await browser.newPage();
-
-    // Inject PDF.js and process all pages in one go inside the browser
-    const images = await page.evaluate(async (base64) => {
-      // Load PDF.js dynamically
-      const script = document.createElement('script');
-      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
-      document.head.appendChild(script);
-
-      await new Promise((resolve) => {
-        script.onload = resolve;
-      });
-
-      const pdfjsLib = (window as any)['pdfjs-dist/build/pdf'];
-      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-
-      const loadingTask = pdfjsLib.getDocument({ data: atob(base64) });
-      const pdf = await loadingTask.promise;
-      const pagesData = [];
-
-      for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i);
-        const viewport = page.getViewport({ scale: 1.5 }); // Balanced quality/speed
-
-        const canvas = document.createElement('canvas');
-        canvas.width = viewport.width;
-        canvas.height = viewport.height;
-        const context = canvas.getContext('2d')!;
-
-        // Fill white background
-        context.fillStyle = '#ffffff';
-        context.fillRect(0, 0, canvas.width, canvas.height);
-
-        await page.render({ canvasContext: context, viewport }).promise;
-
-        pagesData.push({
-          name: `page-${i}.png`,
-          content: canvas.toDataURL('image/png').split(',')[1] // Base64 part
-        });
-      }
-
-      return pagesData;
-    }, pdfBase64);
-
-    const zip = new JSZip();
-    for (const img of images) {
-      zip.file(img.name, img.content, { base64: true });
-    }
-
-    const zipContent = await zip.generateAsync({ type: 'uint8array' });
-    const response = new NextResponse(zipContent as any);
-    response.headers.set('Content-Type', 'application/zip');
-    response.headers.set('Content-Disposition', 'attachment; filename="pdf-images.zip"');
-
-    return response;
-
-  } catch (error) {
-    console.error('Puppeteer conversion error:', error);
-    throw error;
-  } finally {
-    await browser.close();
-  }
 }

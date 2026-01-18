@@ -37,7 +37,21 @@ export default function FileUpload({
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
     accept: acceptedTypes.reduce((acc, type) => {
-      acc[type] = [];
+      if (type.startsWith('.')) {
+        // Map extensions to MIME types
+        let mimeType = '';
+        if (type === '.pdf') mimeType = 'application/pdf';
+        else if (type === '.doc') mimeType = 'application/msword';
+        else if (type === '.docx') mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+        else if (type === '.txt') mimeType = 'text/plain';
+        
+        if (mimeType) {
+          acc[mimeType] = [...(acc[mimeType] || []), type];
+        }
+      } else {
+        // It's already a MIME type (e.g. 'image/*')
+        acc[type] = [];
+      }
       return acc;
     }, {} as Record<string, string[]>),
     maxSize,

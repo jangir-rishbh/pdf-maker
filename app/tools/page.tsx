@@ -110,60 +110,80 @@ function ToolsContent() {
     if (!selectedTool || uploadedFiles.length === 0) return;
 
     setIsProcessing(true);
+    setGeneratedImages([]);
+    setZipUrl(null);
 
     try {
-      const formData = new FormData();
-      uploadedFiles.forEach((file) => {
-        formData.append('files', file);
-      });
-      formData.append('tool', selectedTool.id);
-
-      const response = await fetch('/api/pdf/generate', {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!response.ok) {
-        throw new Error('PDF processing failed');
-      }
-
-
       if (selectedTool.id === 'pdf-to-image') {
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
+        const file = uploadedFiles[0];
 
-        // Unzip to get individual images
-        const zip = new JSZip();
-        const zipContent = await zip.loadAsync(blob);
+        // Dynamically import pdfjs-dist
+        const pdfjsLib = await import('pdfjs-dist');
+
+        // Configure worker
+        // Using unpkg for the specific version to ensure compatibility
+        pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+
+        const arrayBuffer = await file.arrayBuffer();
+        const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+        const pdf = await loadingTask.promise;
+
         const images: { url: string; name: string }[] = [];
+        const zip = new JSZip();
 
-        const promises: Promise<void>[] = [];
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const viewport = page.getViewport({ scale: 2.0 }); // 2.0 scale for better quality
 
-        zipContent.forEach((relativePath, zipEntry) => {
-          if (!zipEntry.dir && zipEntry.name.endsWith('.png')) {
-            const promise = zipEntry.async('blob').then(blob => {
-              images.push({
-                url: window.URL.createObjectURL(blob),
-                name: zipEntry.name
-              });
-            });
-            promises.push(promise);
-          }
-        });
+          const canvas = document.createElement('canvas');
+          canvas.width = viewport.width;
+          canvas.height = viewport.height;
+          const context = canvas.getContext('2d');
 
-        await Promise.all(promises);
+          if (!context) throw new Error('Could not get canvas context');
 
-        // Sort images by page number
-        images.sort((a, b) => {
-          const numA = parseInt(a.name.match(/page-(\d+)/)?.[1] || '0');
-          const numB = parseInt(b.name.match(/page-(\d+)/)?.[1] || '0');
-          return numA - numB;
-        });
+          // Render PDF page into canvas context
+          await page.render({
+            canvasContext: context,
+            viewport: viewport,
+          } as any).promise;
+
+          // Convert canvas to blob
+          const blob = await new Promise<Blob>((resolve) => {
+            canvas.toBlob((b) => resolve(b!), 'image/png');
+          });
+
+          const fileName = `page-${i}.png`;
+          const url = URL.createObjectURL(blob);
+
+          images.push({ url, name: fileName });
+          zip.file(fileName, blob);
+        }
+
+        const zipBlob = await zip.generateAsync({ type: 'blob' });
+        const zipUrl = URL.createObjectURL(zipBlob);
 
         setGeneratedImages(images);
-        setZipUrl(url);
+        setZipUrl(zipUrl);
+
       } else {
-        // Download the PDF for all other tools
+        // Server-side processing for other tools
+        const formData = new FormData();
+        uploadedFiles.forEach((file) => {
+          formData.append('files', file);
+        });
+        formData.append('tool', selectedTool.id);
+
+        const response = await fetch('/api/pdf/generate', {
+          method: 'POST',
+          body: formData,
+        });
+
+        if (!response.ok) {
+          throw new Error('PDF processing failed');
+        }
+
+        // Download the PDF result
         const blob = await response.blob();
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
