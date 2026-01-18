@@ -16,9 +16,9 @@ export default function Home() {
 
   const handleGeneratePDF = async () => {
     if (uploadedFiles.length === 0) return;
-    
+
     setIsProcessing(true);
-    
+
     try {
       const formData = new FormData();
       uploadedFiles.forEach((file) => {
@@ -45,7 +45,7 @@ export default function Home() {
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
-      
+
     } catch (error) {
       console.error('Error generating PDF:', error);
       alert('Failed to generate PDF. Please try again.');
@@ -87,11 +87,11 @@ export default function Home() {
 
         {/* Main Upload Area */}
         <div className="bg-white rounded-xl shadow-lg p-8 mb-12">
-          <FileUpload 
+          <FileUpload
             onFileSelect={handleFileSelect}
             multiple={true}
           />
-          
+
           {uploadedFiles.length > 0 && (
             <div className="mt-8 text-center">
               <Button
@@ -137,7 +137,7 @@ export default function Home() {
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
             {[
               'Image to PDF',
-              'Word to PDF', 
+              'Word to PDF',
               'PDF Merge',
               'PDF Split',
               'Add Password',
@@ -148,8 +148,11 @@ export default function Home() {
                 key={index}
                 variant="outline"
                 className="h-12 justify-center"
+                asChild
               >
-                {tool}
+                <a href={`/tools?tool=${tool.toLowerCase().replace(/\s+/g, '-')}`}>
+                  {tool}
+                </a>
               </Button>
             ))}
           </div>

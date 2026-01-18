@@ -1,16 +1,18 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
+import JSZip from 'jszip';
 import Layout from '@/components/Layout';
 import FileUpload from '@/components/FileUpload';
 import ImagePreview from '@/components/ImagePreview';
 import { Button } from '@/components/ui/button';
-import { 
-  Image, 
-  FileText, 
-  Lock, 
-  Scissors, 
-  Merge, 
+import {
+  Image,
+  FileText,
+  Lock,
+  Scissors,
+  Merge,
   Type,
   Download,
   Upload
@@ -24,7 +26,8 @@ interface Tool {
   acceptedTypes?: string[];
 }
 
-export default function ToolsPage() {
+function ToolsContent() {
+  const searchParams = useSearchParams();
   const [selectedTool, setSelectedTool] = useState<Tool | null>(null);
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -39,49 +42,60 @@ export default function ToolsPage() {
       description: 'Convert JPG, PNG, and other images to PDF',
       acceptedTypes: ['image/*']
     },
+
     {
       id: 'word-to-pdf',
       name: 'Word to PDF',
       icon: <FileText className="h-6 w-6" />,
       description: 'Convert Word documents to PDF',
-      acceptedTypes: ['.doc', '.docx']
+      acceptedTypes: ['.doc', '.docx', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']
     },
     {
       id: 'pdf-merge',
       name: 'PDF Merge',
       icon: <Merge className="h-6 w-6" />,
       description: 'Combine multiple PDFs into one',
-      acceptedTypes: ['.pdf']
+      acceptedTypes: ['application/pdf']
     },
     {
       id: 'pdf-split',
       name: 'PDF Split',
       icon: <Scissors className="h-6 w-6" />,
       description: 'Split PDF into multiple files',
-      acceptedTypes: ['.pdf']
+      acceptedTypes: ['application/pdf']
     },
     {
       id: 'pdf-password',
       name: 'Add Password',
       icon: <Lock className="h-6 w-6" />,
       description: 'Protect PDF with password',
-      acceptedTypes: ['.pdf']
+      acceptedTypes: ['application/pdf']
     },
     {
       id: 'pdf-to-image',
       name: 'PDF to Image',
       icon: <Upload className="h-6 w-6" />,
       description: 'Convert PDF pages to images',
-      acceptedTypes: ['.pdf']
+      acceptedTypes: ['application/pdf']
     },
     {
       id: 'text-to-pdf',
       name: 'Text to PDF',
       icon: <Type className="h-6 w-6" />,
       description: 'Convert text files to PDF',
-      acceptedTypes: ['.txt']
+      acceptedTypes: ['text/plain']
     }
   ];
+
+  useEffect(() => {
+    const toolId = searchParams.get('tool');
+    if (toolId) {
+      const tool = tools.find(t => t.id === toolId);
+      if (tool) {
+        setSelectedTool(tool);
+      }
+    }
+  }, [searchParams]);
 
   const handleToolSelect = (tool: Tool) => {
     setSelectedTool(tool);
@@ -94,9 +108,9 @@ export default function ToolsPage() {
 
   const handleProcess = async () => {
     if (!selectedTool || uploadedFiles.length === 0) return;
-    
+
     setIsProcessing(true);
-    
+
     try {
       const formData = new FormData();
       uploadedFiles.forEach((file) => {
@@ -113,42 +127,43 @@ export default function ToolsPage() {
         throw new Error('PDF processing failed');
       }
 
+
       if (selectedTool.id === 'pdf-to-image') {
-        // Handle ZIP file with HTML pages
         const blob = await response.blob();
         const url = window.URL.createObjectURL(blob);
-        
-        // Create sample images for preview (in real implementation, extract from ZIP)
-        const sampleImages = [];
-        const pageCount = 3; // Estimate or get from PDF
-        
-        for (let i = 1; i <= pageCount; i++) {
-          // Create a simple preview image
-          sampleImages.push({
-            url: `data:image/svg+xml;base64,${btoa(`
-              <svg width="300" height="200" xmlns="http://www.w3.org/2000/svg">
-                <rect width="100%" height="100%" fill="#ffffff" stroke="#333333" stroke-width="2"/>
-                <text x="50%" y="40%" text-anchor="middle" font-family="Arial" font-size="18" font-weight="bold" fill="#333333">
-                  PDF Page ${i}
-                </text>
-                <text x="50%" y="60%" text-anchor="middle" font-family="Arial" font-size="12" fill="#666666">
-                  Click to download HTML file
-                </text>
-                <rect x="10" y="10" width="60" height="20" fill="#3b82f6" rx="2"/>
-                <text x="40" y="24" text-anchor="middle" font-family="Arial" font-size="10" fill="white">
-                  Page ${i}
-                </text>
-              </svg>
-            `)}`,
-            name: `page-${i}.html`
-          });
-        }
-        setGeneratedImages(sampleImages);
-        
-        // Store ZIP URL for download
+
+        // Unzip to get individual images
+        const zip = new JSZip();
+        const zipContent = await zip.loadAsync(blob);
+        const images: { url: string; name: string }[] = [];
+
+        const promises: Promise<void>[] = [];
+
+        zipContent.forEach((relativePath, zipEntry) => {
+          if (!zipEntry.dir && zipEntry.name.endsWith('.png')) {
+            const promise = zipEntry.async('blob').then(blob => {
+              images.push({
+                url: window.URL.createObjectURL(blob),
+                name: zipEntry.name
+              });
+            });
+            promises.push(promise);
+          }
+        });
+
+        await Promise.all(promises);
+
+        // Sort images by page number
+        images.sort((a, b) => {
+          const numA = parseInt(a.name.match(/page-(\d+)/)?.[1] || '0');
+          const numB = parseInt(b.name.match(/page-(\d+)/)?.[1] || '0');
+          return numA - numB;
+        });
+
+        setGeneratedImages(images);
         setZipUrl(url);
       } else {
-        // Download the PDF for other tools
+        // Download the PDF for all other tools
         const blob = await response.blob();
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -159,7 +174,7 @@ export default function ToolsPage() {
         window.URL.revokeObjectURL(url);
         document.body.removeChild(a);
       }
-      
+
     } catch (error) {
       console.error('Error processing PDF:', error);
       alert('Failed to process PDF. Please try again.');
@@ -168,9 +183,9 @@ export default function ToolsPage() {
     }
   };
 
+
   const handleDownload = async (index: number) => {
     if (index === -1) {
-      // Download all as ZIP
       if (zipUrl) {
         const a = document.createElement('a');
         a.href = zipUrl;
@@ -180,7 +195,6 @@ export default function ToolsPage() {
         document.body.removeChild(a);
       }
     } else {
-      // Download individual image
       const image = generatedImages[index];
       const a = document.createElement('a');
       a.href = image.url;
@@ -247,12 +261,12 @@ export default function ToolsPage() {
               </Button>
             </div>
 
-            <FileUpload 
+            <FileUpload
               onFileSelect={handleFileSelect}
               acceptedTypes={selectedTool.acceptedTypes}
               multiple={selectedTool.id === 'pdf-merge'}
             />
-            
+
             {uploadedFiles.length > 0 && (
               <div className="mt-8 text-center">
                 <Button
@@ -271,11 +285,11 @@ export default function ToolsPage() {
                 </Button>
               </div>
             )}
-            
+
             {/* Show Image Preview for PDF to Image */}
             {selectedTool?.id === 'pdf-to-image' && generatedImages.length > 0 && (
               <div className="mt-8">
-                <ImagePreview 
+                <ImagePreview
                   images={generatedImages}
                   onDownload={handleDownload}
                 />
@@ -285,5 +299,13 @@ export default function ToolsPage() {
         )}
       </div>
     </Layout>
+  );
+}
+
+export default function ToolsPage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <ToolsContent />
+    </Suspense>
   );
 }
